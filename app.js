@@ -8,6 +8,7 @@ const session = require('express-session');
 const passport = require('passport');
 const passportLocalMongoose = require("passport-local-mongoose");
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const TwitterStrategy = require('passport-twitter').Strategy;
 const findOrCreate = require('mongoose-find-or-create');
 // const bcrypt = require('bcrypt');
 // const saltRounds = 10;
@@ -37,9 +38,11 @@ mongoose.connect('mongodb://localhost:27017/userDB', {
 //   password: String
 // }
 const userSchema = new mongoose.Schema({
-  email: String,
+  username:String,
+  emails: String,
   password: String,
   googleId: String,
+  twitterId: String,
   secret: String
 });
 
@@ -71,7 +74,23 @@ passport.use(new GoogleStrategy({
   },
   function(accessToken, refreshToken, profile, cb) {
     User.findOrCreate({
+      username: profile.emails[0].value,
       googleId: profile.id
+    }, function(err, user) {
+      return cb(err, user);
+    });
+  }
+));
+
+passport.use(new TwitterStrategy({
+    consumerKey: process.env.TWITTER_CONSUMER_KEY,
+    consumerSecret: process.env.TWITTER_CONSUMER_SECRET,
+    callbackURL: "http://localhost:3000/auth/twitter/secrets",
+    includeEmail: true
+  },
+  function(token, tokenSecret, profile, cb) {
+    User.findOrCreate({
+      twitterId: profile.id
     }, function(err, user) {
       return cb(err, user);
     });
@@ -84,7 +103,7 @@ app.get("/", function(req, res) {
 
 app.get("/auth/google",
   passport.authenticate('google', {
-    scope: ["profile"]
+    scope: ["profile","email"]
   })
 );
 
@@ -94,7 +113,18 @@ app.get("/auth/google/secrets",
   }),
   function(req, res) {
     // Successful authentication, redirect to secrets page
-    res.redirect('/secrets');
+    res.redirect("/secrets");
+  });
+
+app.get("/auth/twitter",
+  passport.authenticate('twitter'));
+
+app.get('/auth/twitter/secrets',
+  passport.authenticate('twitter', {
+    failureRedirect: "/login"
+  }),
+  function(req, res) {
+    res.redirect("/secrets");
   });
 
 app.get("/login", function(req, res) {
@@ -111,12 +141,18 @@ app.get("/logout", function(req, res) {
 });
 
 app.get("/secrets", function(req, res) {
-  User.find({"secret": {$ne: null}}, function(err, foundUsers){
-    if(err){
+  User.find({
+    "secret": {
+      $ne: null
+    }
+  }, function(err, foundUsers) {
+    if (err) {
       console.log(err);
     } else {
-      if(foundUsers){
-        res.render("secrets", {usersWithSecrets: foundUsers});
+      if (foundUsers) {
+        res.render("secrets", {
+          usersWithSecrets: foundUsers
+        });
       }
     }
   });
@@ -163,16 +199,16 @@ app.post("/login", function(req, res) {
   });
 });
 
-app.post("/submit", function(req,res){
+app.post("/submit", function(req, res) {
   const submittedSecret = req.body.secret;
 
-  User.findById(req.user.id, function(err, foundUser){
-    if(err){
+  User.findById(req.user.id, function(err, foundUser) {
+    if (err) {
       console.log(err);
     } else {
-      if(foundUser){
+      if (foundUser) {
         foundUser.secret = submittedSecret;
-        foundUser.save(function(){
+        foundUser.save(function() {
           res.redirect("/secrets");
         });
       }
